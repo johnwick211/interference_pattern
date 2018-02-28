@@ -1,6 +1,8 @@
 from PIL import Image
 import numpy as np
 import os
+import cv2
+import time
 
 def _big(fft2, xlen, ylen, minI):
     """
@@ -24,8 +26,9 @@ def _big(fft2, xlen, ylen, minI):
                 loc.append([i, j])
     return I, loc
 
-def _make_2DGaussian(A, y_sd, x_sd, y0_i, x0_i, xlen, ylen):
+def _OLD_make_2DGaussian(A, y_sd, x_sd, y0_i, x0_i, xlen, ylen):
     """
+    "OLD Version"
     Parameters:
     A: The multiple of a normalised Gaussian
     y_sd: Standard deviation of vertical Gaussian
@@ -49,6 +52,64 @@ def _make_2DGaussian(A, y_sd, x_sd, y0_i, x0_i, xlen, ylen):
         for j in range(len(y)):
             gaussian2D[j][i] = gaussian(A, y_sd, y[j])*gaussian(A, x_sd, x[i])
     return gaussian2D
+
+def _make_2DGaussian(A, y_sd, x_sd, y0_i, x0_i, xlen, ylen):
+    """
+    "Improved version"
+    Parameters:
+    A: The multiple of a normalised Gaussian
+    y_sd: Standard deviation of vertical Gaussian
+    x_sd: Standard deviation of horizontal Gaussian
+    y0_i: The vertical index of the Gaussian centre
+    x0_i: The horizontal index of the Gaussian centre
+    xlen: Number of pixels horizontally
+    ylen: Number of pixels vertically
+    """
+
+    x = np.zeros(xlen)
+    y = np.zeros(ylen)
+
+    #MAKE THE 1D GAUSSIAN CURVES
+    kernelx = cv2.getGaussianKernel(xlen, x_sd)
+    kernely = cv2.getGaussianKernel(ylen, y_sd)
+
+    #THIS IS USED TO SHIFT THE GAUSSIAN KERNAL
+    check_x = xlen//2 - x0_i
+    check_y = ylen//2 - y0_i
+
+    #SHIFT THE x GAUSSIAN CURVE TO x0_i
+    #SOME POINTS OF THE GAUSSIAN CURVE IS LOST FROM SHIFTING
+    #THE LOST POINTS ARE REPLACED WITH ZEROS (THEY ARE FAR FROM PEAK)
+    if check_x > 0:
+        kernelx = kernelx[xlen//2 - x0_i:]
+        kernelx_len = len(kernelx)
+        x[:kernelx_len] = kernelx.T[0]
+    elif check_x < 0:
+        max_x_index = xlen-x0_i+xlen//2
+        kernelx = kernelx[:max_x_index]
+        kernelx_len = len(kernelx)
+        x[-kernelx_len:] = kernelx.T[0]
+
+    #SHIFT THE x GAUSSIAN CURVE TO y0_i
+    #SOME POINTS OF THE GAUSSIAN CURVE IS LOST FROM SHIFTING
+    #THE LOST POINTS ARE REPLACED WITH ZEROS (THEY ARE FAR FROM PEAK)
+    if check_y > 0:
+        kernely = kernely[ylen//2 - y0_i:]
+        kernely_len = len(kernely)
+        y[:kernely_len] = kernely.T[0]
+    elif check_y < 0:
+        max_y_index = ylen-y0_i+ylen//2
+        kernely = kernely[:max_y_index]
+        kernely_len = len(kernely)
+        y[-kernely_len:] = kernely.T[0]
+
+    #AMPLIFY THE GAUSSIAN CURVES
+    x, y = A*x, A*y
+
+    #CONVERT THE 1D GAUSSIAN CURVES INTO A 2D MASK
+    x, y = np.array([list(x)]), np.array([list(y)])
+    mask = x*y.T
+    return mask
 
 def _make_ellipse(A, y_rad, x_rad, y_i, x_i, xlen, ylen):
     """
@@ -100,7 +161,33 @@ def _applymask(mask_func, fft2, points_loc, xlen, ylen, x_sd, y_sd, A):
     #RETURNS A NEW 2D ARRAY IN FOURIER SPACE AND THE 2D ARRAY OF THE MASK
     return newfft2, mask
 
-def clean_image(image, mask_func, x_sd, y_sd, A, r = 100):
+def _remove_multiple_masking(points_loc):
+    """
+    Removes all high intensity points in the same cluster and leaves only 1 location per cluster
+    """
+    new_points_loc = []
+
+    for i in range(len(points_loc)):
+        temp_cluster = []
+        save = True
+
+        #FIND POINTS NEAR points_loc[i]
+        for j in range(len(points_loc)):
+            dist = (points_loc[i][0] - points_loc[j][0])**2 + (points_loc[i][1] - points_loc[j][1])**2
+            if dist < 10:
+                temp_cluster.append(points_loc[j])
+
+        #IF NO POINTS IN THE CLUSTER OF POINTS ARE SAVED
+        #points_loc[i] WILL BE SAVED IN new_points_loc
+        for loc in temp_cluster:
+            if loc in new_points_loc:
+                save = False
+        if save == True:
+            new_points_loc.append(points_loc[i])
+
+    return new_points_loc
+
+def clean_image(image, mask_func, x_sd, y_sd, A):
     #FFT THE IMAGE
     fft2 = np.fft.fft2(image)
     absfft2 = np.abs(fft2)
@@ -108,17 +195,7 @@ def clean_image(image, mask_func, x_sd, y_sd, A, r = 100):
     #FIND THE LOCATIONS THAT HAVE HIGH INTENSITY IN FFT IMAGE
     ylen, xlen = absfft2.shape
     points, points_loc = _big(absfft2, xlen, ylen, 1e6) #points_loc = [[y_i, x_i], ....]
-
-    #REMOVE SOME OF THE HIGH INTENSITY POINTS
-#    new_points_loc = []
-#    for u in range(len(points_loc)):
-#        i, j = points_loc[u]
-#        if i<r and j<r:
-#            None
-#        else:
-#            new_points_loc.append(points_loc[u])
-#    points_loc = new_points_loc
-#    print(points_loc)
+    points_loc = _remove_multiple_masking(points_loc)
     
     #APPLY MASK TO EVERY HIGH INTENSITY POINT ON FOURIER IMAGE
     newfft2, mask = _applymask(mask_func, fft2, points_loc, xlen, ylen, x_sd, y_sd, A)
@@ -129,21 +206,25 @@ def clean_image(image, mask_func, x_sd, y_sd, A, r = 100):
     return fft2, absfft2, newfft2, absnewfft2, newimage, absnewimage, mask
 
 #INFORMATION OF THE IMAGES
-folder = 'cropped'
-base_name = 'new_image_'
+folder = 'original'
+base_name = 'image_'
 file_ext = '.tif'
 N = 19
 filenumbers = range(N)
 
-save_image_folder = 'clean2'
+save_image_folder = 'clean_full2'
 
+#MAKE THE OUTPUT FOLDER IF IT DOES NOT EXIST
 if not os.path.exists(save_image_folder):
     os.makedirs(save_image_folder)
 
+times = []
 #LOOP ALL IMAGES
 for k in filenumbers:
+    t0 = time.time()
+
     k = str(k)
-    print(k)
+    #print(k)
     
     #OPEN .tif FILE
     file_path = folder + '/' + base_name + k + file_ext
@@ -161,8 +242,6 @@ for k in filenumbers:
 
     #APPLY MASK TO THE IMAGE TO CLEAN (CAN REPEATEDLY CLEAN THE IMAGE)
     fft2, absfft2, newfft2, absnewfft2, newimage, absnewimage, mask = clean_image(image, mask_func, x_sd, y_sd, A)
-    #fft2, absfft2, newfft2, absnewfft2, newimage, absnewimage, mask = clean_image(newimage, mask_func, x_sd, y_sd, A)
-    #fft2, absfft2, newfft2, absnewfft2, newimage, absnewimage, mask = clean_image(newimage, mask_func, x_sd, y_sd, A)
 
     #CREATE A NEW ARRAY OF THE CLEANED COLOURED IMAGE TO SAVE AS .tif FILE
     absnewimage = absnewimage/absnewimage.max()*255 
@@ -175,6 +254,15 @@ for k in filenumbers:
     #CONVERT ARRAY INTO IMAGE AND SAVE IT.
     new_image = Image.fromarray(new_array, mode='RGBA') # float32
     new_image.save(save_image_folder+"/new_image_%s.tif" %k, "TIFF")
+
+    t1 = time.time()
+
+    t = t1-t0
+    times.append(t)
+    print(t)
+
+print(np.mean(times))
+
 
 
 
