@@ -17,17 +17,19 @@ def makefile(filename):
 
 def largest_intensity(intensity_values):
     max_intensity = 0
-    for array in intensity_values:
-        if max(array) > max_intensity:
-            max_intensity = max(array)
+    for intensity_array in intensity_values:
+        for array in intensity_array:
+            if max(array) > max_intensity:
+                max_intensity = max(array)
     return max_intensity
 
 
 def smallest_intensity(intensity_values):
     min_intensity = largest_intensity(intensity_values)
-    for array in intensity_values:
-        if min(array) < min_intensity:
-            min_intensity = min(array)
+    for intensity_array in intensity_values:
+        for array in intensity_array:
+            if min(array) < min_intensity:
+                min_intensity = min(array)
     return min_intensity
 
 def format_fn(tick_val, tick_pos):
@@ -42,6 +44,9 @@ def format_fn(tick_val, tick_pos):
         return "$0$"
     else:
         return "$%i\pi$" % (tick_val / np.pi)
+
+def ploterrorbar(x, y, yerr):
+    plt
     
 def plotdata(num, fig, voltages, k_values):
     """
@@ -50,10 +55,8 @@ def plotdata(num, fig, voltages, k_values):
     num_up = int(num/2) + 1
     
     ax21 = fig.add_subplot(2, 3, 4)
-    ax21.plot(voltages[:num_up], k_values[:num_up], 'gx', label='Increasing voltage')
-    ax21.plot(voltages[:num_up], k_values[:num_up], 'g-')
-    ax21.plot(voltages[num_up-1:], k_values[num_up-1:], 'kx', label='Decreasing voltage')
-    ax21.plot(voltages[num_up-1:], k_values[num_up-1:], 'k-')
+    ax21.errorbar(voltages[:num_up], k_values[0][:num_up], yerr=k_values[0][:num_up], fmt='gx-',label='Increasing voltage')
+    ax21.errorbar(voltages[num_up-1:], k_values[0][num_up-1:], yerr=k_values[0][num_up-1:], fmt='kx-', label='Decreasing voltage')
     k_plot0, = ax21.plot([], [], 'g-', linewidth=3)
     k_plot1, = ax21.plot([], [], 'k-', linewidth=3)
     ax21.set_title('Optimised wavenumbers with voltage')
@@ -64,10 +67,8 @@ def plotdata(num, fig, voltages, k_values):
     ax22 = fig.add_subplot(2,3,5)
     ax22.yaxis.set_major_formatter(FuncFormatter(format_fn))
     ax22.yaxis.set_major_locator(MultipleLocator(base=np.pi))
-    ax22.plot(voltages[:num_up], phase_values[:num_up], 'gx', label='Increasing voltage')
-    ax22.plot(voltages[:num_up], phase_values[:num_up], 'g-')
-    ax22.plot(voltages[num_up-1:], phase_values[num_up-1:], 'kx', label='Decreasing voltage')
-    ax22.plot(voltages[num_up-1:], phase_values[num_up-1:], 'k-')
+    ax22.errobar(voltages[:num_up], phase_values[0][:num_up], yerr=phase_values[0][:num_up], fmt='gx-', label='Increasing voltage')
+    ax22.plot(voltages[num_up-1:], phase_values[0][num_up-1:], yerr=phase_values[0][num_up-1:], fmt='kx-', label='Decreasing voltage')
     phase_solved0, = ax22.plot([], [], 'g-', linewidth=3)
     phase_solved1, = ax22.plot([], [], 'k-', linewidth=3)
     ax22.set_title("Phases (solved)")
@@ -76,10 +77,8 @@ def plotdata(num, fig, voltages, k_values):
     ax22.legend()
 
     ax23 = fig.add_subplot(2, 3, 6)
-    ax23.plot(voltages[:num_up], original_phases[:num_up], 'gx', label='Increasing voltage')
-    ax23.plot(voltages[:num_up], original_phases[:num_up], 'g-')
-    ax23.plot(voltages[num_up-1:], original_phases[num_up-1:], 'kx', label='Decreasing voltage')
-    ax23.plot(voltages[num_up - 1:], original_phases[num_up - 1:], 'k-')
+    ax23.plot(voltages[:num_up], original_phases[0][:num_up], yerr=original_phases[0][:num_up], fmt='gx-', label='Increasing voltage')
+    ax23.plot(voltages[num_up-1:], original_phases[0][num_up-1:], yerr=original_phases[0][num_up-1:], fmt='kx-', label='Decreasing voltage')
     phase_orig0, = ax23.plot([], [], 'g-', linewidth=3)
     phase_orig1, = ax23.plot([], [], 'k-', linewidth=3)
     ax23.set_title('Original phases')
@@ -100,6 +99,9 @@ file_ext = '.tif'
 no_of_images = 19
 filenumbers = range(no_of_images)
 
+no_of_repeats = 10
+vertical_fringes = False
+
 picklefile = 'data.p'
 
 no_of_points_forward = (no_of_images + 1) // 2
@@ -110,16 +112,27 @@ voltages = [0.3, 10.6, 20.4, 29.8, 39.3, 49.3, 59.3, 70.3, 83.3,\
 
 if len(voltages) != no_of_images:
     raise ValueError('Incorrect number of images or incorrect values of voltages')
-    
-# LISTS OF PARAMETERS FROM FITTING
-amp_values = np.zeros(no_of_images)
-k_values = np.zeros(no_of_images)
-phase_values = np.zeros(no_of_images)
-offset_values = np.zeros(no_of_images)
 
-intensity_values = []
-intensity_values_fit = []
-x = []
+if vertical_fringes == False:
+    max_space = 1024
+    x = np.arange(1280)
+    xlen = 1280
+else:
+    max_space = 1280
+    x = np.arange(1024)
+    xlen = 1024
+
+crop_intervals = max_space/(no_of_repeats+1)
+crop_spacing = np.arange(0, max_space, crop_intervals)
+
+# LISTS OF PARAMETERS FROM FITTING
+amp_values = np.zeros((no_of_images, no_of_repeats))
+k_values = np.zeros((no_of_images, no_of_repeats))
+phase_values = np.zeros((no_of_images, no_of_repeats))
+offset_values = np.zeros((no_of_images, no_of_repeats))
+
+intensity_values = np.zeros((no_of_images, no_of_repeats, xlen))
+intensity_values_fit = np.zeros((no_of_images, no_of_repeats, xlen))
 
 #LOOP ON EVERY IMAGE
 for file_number in filenumbers:
@@ -129,31 +142,51 @@ for file_number in filenumbers:
     
     #OPEN .tif FILE
     filename = folder + '/' + base_name + file_number_str + file_ext
-    new_image = func_crop.crop_algorithm(filename)
-    
-    new_image = np.asarray(new_image.convert('L'))
-    new_image = func_clean.clean_algorithm(new_image)
-    
-    optimised_data = func_optimise.optimise_algorithm(new_image)
 
-    amp_values[file_number] = optimised_data[0]
-    k_values[file_number] = optimised_data[1]
-    phase_values[file_number] = optimised_data[2]
-    offset_values[file_number] = optimised_data[3]
+    for repeat_number in range(no_of_repeats-1):
+        new_image = func_crop.crop_algorithm(filename, vertical_fringes=vertical_fringes, min_crop=crop_spacing[repeat_number], max_crop=crop_spacing[repeat_number+1])
     
-    intensity_values.append(optimised_data[4])
-    intensity_values_fit.append(optimised_data[5])
+        new_image = np.asarray(new_image.convert('L'))
+        new_image = func_clean.clean_algorithm(new_image)
 
-    x = optimised_data[6]
-    
-original_phases = phase_values
+        optimised_data = func_optimise.optimise_algorithm(new_image)
 
-for u in range(1, len(filenumbers)):
-    diff = phase_values[u-1] - phase_values[u]
-    diff_sign = np.sign(diff)
-    while abs(diff) > np.pi/2:
-        phase_values[u] = phase_values[u] + diff_sign*np.pi
-        diff = abs(phase_values[u] - phase_values[u - 1])
+        amp_values[file_number, repeat_number] = optimised_data[0]
+        k_values[file_number, repeat_number] = optimised_data[1]
+        phase_values[file_number, repeat_number] = optimised_data[2]
+        offset_values[file_number, repeat_number] = optimised_data[3]
+
+        intensity_values[file_number, repeat_number] = optimised_data[6]
+        intensity_values_fit[file_number, repeat_number] = optimised_data[5]
+
+        for u in range(1, len(filenumbers)):
+            diff = phase_values[u-1] - phase_values[u]
+            diff_sign = np.sign(diff)
+            while abs(diff) > np.pi/2:
+                phase_values[u] = phase_values[u] + diff_sign*np.pi
+                diff = abs(phase_values[u] - phase_values[u - 1])
+
+datafile1 = open('mid_data.p', 'wb')
+pickle.dump([voltages, k_values, phase_values, intensity_values, intensity_values_fit], datafile)
+datafile1.close()
+
+def mean_std(array):
+    if array.ndim == 3:
+        array = array.transpose(0, 2, 1)
+        for array_index in filenumbers:
+            array[i] = [list(map(np.mean, array[i]))] + [list(map(np.std, array[i]))]
+        return array
+    array = [list(map(np.mean, array))] + [list(map(np.std, array))]
+    return array
+
+amp_values = mean_std(amp_values)
+k_values = mean_std(k_values)
+phase_values = mean_std(phase_values)
+offset_values = mean_std(offset_values)
+intensity_values = mean_std(intensity_values)
+intensity_values_fit = mean_std(intensity_values_fit)
+
+original_phases = phase_values[:]
         
 #SAVE INFORMATION INTO A FILE
 #makefile(picklefile)
@@ -166,8 +199,8 @@ fig = plt.figure(num=1, figsize=(16, 9))
 
 ax00 = fig.add_subplot(2, 1, 1)
 plt.subplots_adjust(left=0.15, bottom=0.25)
-pattern00, = ax00.plot(x, intensity_values[0], 'g-', linewidth=3, label='measurements')
-fitted_pattern00, = ax00.plot(x, intensity_values_fit[0], 'b-', linewidth=3, label='fitted')
+pattern00, = ax00.errorbar(x, intensity_values[0][0], yerr=intensity_values[0][1], fmt='g-', linewidth=3, label='measurements')
+fitted_pattern00, = ax00.plot(x, intensity_values_fit[0][0], yerr=intensity_values_fit[0][1], fmt='b-', linewidth=3, label='fitted')
 title00 = ax00.set_title(' ')
 ax00.set_xlim(x[0], x[-1])
 ax00.set_ylim(smallest_intensity(intensity_values), largest_intensity(intensity_values))
@@ -179,22 +212,24 @@ shte = Slider(ax_slider, 'i', 0, no_of_images-1, valinit=0, valfmt='%i')
 
 ax_list, k_plot, phase_solved_plot, phase_orig_plot = plotdata(num=no_of_images, fig=fig, voltages=voltages, k_values=k_values)
 
+def plot_control(plot, val, past_half = True):
+    if past_half == True:
+        plot[0].set_data(voltages[:no_of_points_forward], plot[0][:no_of_points_forward])
+        plot[1].set_data(voltages[no_of_points_forward - 1:val + 1], plot[0][no_of_points_forward - 1:val + 1])
+    else:
+        plot[0].set_data(voltages[:val+1], plot[0][:val+1])
+        plot[1].set_data([],[])
+
 def update(val):
     val = int(val)
     if val > no_of_points_forward:
-        k_plot[0].set_data(voltages[:no_of_points_forward], k_values[:no_of_points_forward])
-        k_plot[1].set_data(voltages[no_of_points_forward-1:val+1], k_values[no_of_points_forward-1:val+1])
-        phase_solved_plot[0].set_data(voltages[:no_of_points_forward], phase_values[:no_of_points_forward])
-        phase_solved_plot[1].set_data(voltages[no_of_points_forward-1:val+1], phase_values[no_of_points_forward-1:val+1])
-        phase_orig_plot[0].set_data(voltages[:no_of_points_forward], original_phases[:no_of_points_forward])
-        phase_orig_plot[1].set_data(voltages[no_of_points_forward-1:val+1], original_phases[no_of_points_forward-1:val+1])
+        plot_control(k_values, val, past_half=True)
+        plot_control(phase_solved_plot, val, past_half=True)
+        plot_control(phase_orig_plot, val, past_half=True)
     else:
-        k_plot[0].set_data(voltages[:val+1], k_values[:val+1])
-        k_plot[1].set_data([],[])
-        phase_solved_plot[0].set_data(voltages[:val+1], phase_values[:val+1])
-        phase_solved_plot[1].set_data([],[])
-        phase_orig_plot[0].set_data(voltages[:val+1], original_phases[:val+1])
-        phase_orig_plot[1].set_data([],[])
+        plot_control(k_values, val, past_half=False)
+        plot_control(phase_solved_plot, val, past_half=False)
+        plot_control(phase_orig_plot, val, past_half=False)
     pattern00.set_data(x, intensity_values[val])
     fitted_pattern00.set_data(x, intensity_values_fit[val])
     title00.set_text("i = %i, k = %0.5f, phase = %0.4f, orig_phase = %0.4f" % (val, k_values[val], phase_values[val], original_phases[val]))
